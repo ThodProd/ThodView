@@ -259,8 +259,12 @@
 
             <!-- quick edit toolbar -->
             <Border x:Name="EditToolbar" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                    Margin="14,0,0,14" Padding="4" CornerRadius="13"
+                    Margin="64,0,0,14" Padding="4" CornerRadius="13"
+                    RenderTransformOrigin="0,0.5" Opacity="1"
                     Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="ToolbarTransform" X="-18"/>
+                </Border.RenderTransform>
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.22" Color="Black"/>
                 </Border.Effect>
@@ -276,6 +280,11 @@
                             ToolTip="Метаданные (M)" Click="Metadata_Click"/>
                 </StackPanel>
             </Border>
+
+            <Button x:Name="EditToggleButton" Style="{StaticResource GearButtonStyle}" Visibility="Collapsed"
+                    HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="14,0,0,14"
+                    Content="&#xE70F;" ToolTip="Показать инструменты (поворот, отражение, обрезка)"
+                    Click="EditToggle_Click"/>
 
             <!-- previous / next image in the same folder -->
             <Border x:Name="FolderNav" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom"

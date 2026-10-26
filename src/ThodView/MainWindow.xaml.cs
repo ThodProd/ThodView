@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     private Point _cropEnd;
     private bool _loading;
     private bool _dirty;
+    private bool _toolbarOpen;
     private string? _filePath;
     private readonly List<string> _folderFiles = new();
     private int _folderIndex = -1;
@@ -392,6 +393,7 @@ public partial class MainWindow : Window
         matrix.Translate(_offsetX, _offsetY);
         PreviewImage.RenderTransform = new MatrixTransform(matrix);
         UpdateZoomText();
+        HideToolbarIfFitted();
     }
 
     private Rect ImageRect() => new(_offsetX, _offsetY, _width * _scale, _height * _scale);
@@ -483,6 +485,7 @@ public partial class MainWindow : Window
         if (_cropMode) { ExitCrop(); return; }
 
         GearPanel.Visibility = Visibility.Collapsed;
+        HideToolbar();
         _cropMode = true;
         _cropDragging = false;
         UpdateFolderNavVisibility();
@@ -651,6 +654,72 @@ public partial class MainWindow : Window
         FitToWindow();
         UpdateTitle();
         UpdateStatus();
+    }
+
+    private void EditToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pixels is null) return;
+        if (_toolbarOpen) HideToolbar();
+        else ShowToolbar();
+    }
+
+    private void ShowToolbar()
+    {
+        if (_pixels is null) return;
+        _toolbarOpen = true;
+        EditToolbar.Visibility = Visibility.Visible;
+        ToolbarTransform.BeginAnimation(TranslateTransform.XProperty, null);
+        EditToolbar.BeginAnimation(OpacityProperty, null);
+        ToolbarTransform.X = -18;
+        EditToolbar.Opacity = 0;
+        var slide = new DoubleAnimation(0, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        var fade = new DoubleAnimation(1, TimeSpan.FromMilliseconds(160));
+        ToolbarTransform.BeginAnimation(TranslateTransform.XProperty, slide);
+        EditToolbar.BeginAnimation(OpacityProperty, fade);
+        EditToggleButton.ToolTip = "Скрыть инструменты";
+    }
+
+    private void HideToolbar()
+    {
+        if (!_toolbarOpen)
+        {
+            EditToolbar.Visibility = Visibility.Collapsed;
+            return;
+        }
+        _toolbarOpen = false;
+        var slide = new DoubleAnimation(-18, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(130));
+        fade.Completed += (_, _) =>
+        {
+            if (_toolbarOpen) return;
+            EditToolbar.Visibility = Visibility.Collapsed;
+            ToolbarTransform.X = -18;
+            EditToolbar.Opacity = 1;
+        };
+        ToolbarTransform.BeginAnimation(TranslateTransform.XProperty, slide);
+        EditToolbar.BeginAnimation(OpacityProperty, fade);
+        EditToggleButton.ToolTip = "Показать инструменты (поворот, отражение, обрезка)";
+    }
+
+    private bool IsImageFullyVisible()
+    {
+        if (_pixels is null || Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return false;
+        var rect = ImageRect();
+        const double tolerance = 1.5;
+        return rect.Left >= -tolerance && rect.Top >= -tolerance &&
+               rect.Right <= Viewport.ActualWidth + tolerance &&
+               rect.Bottom <= Viewport.ActualHeight + tolerance;
+    }
+
+    private void HideToolbarIfFitted()
+    {
+        if (_toolbarOpen && IsImageFullyVisible()) HideToolbar();
     }
 
     /* ------------------------------------------------------------------ */
@@ -1047,10 +1116,14 @@ public partial class MainWindow : Window
     private void UpdateStatus()
     {
         var hasImage = _pixels is not null;
-        EditToolbar.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
+        EditToggleButton.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
         OpenFolderButton.IsEnabled = _filePath is not null;
         if (!hasImage)
         {
+            _toolbarOpen = false;
+            EditToolbar.Visibility = Visibility.Collapsed;
+            ToolbarTransform.X = -18;
+            EditToolbar.Opacity = 1;
             StatusLeft.Text = "Готово";
             StatusCenter.Text = "";
             StatusRight.Text = "—";
