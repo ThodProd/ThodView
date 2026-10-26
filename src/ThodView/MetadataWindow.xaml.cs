@@ -33,11 +33,11 @@ public partial class MetadataWindow : Window
             var entries = await MetadataService.ReadAsync(_path);
             _original = entries.Select(x => x.Clone()).ToList();
             _rows.Clear();
-            foreach (var entry in entries) _rows.Add(entry);
+            foreach (var entry in entries) { Track(entry); _rows.Add(entry); }
             _dirty = false;
             StatusText.Text = entries.Count == 0
                 ? "Метаданных нет. Нажмите «Добавить», чтобы создать."
-                : $"Записей: {entries.Count}. Изменяйте значения и нажмите «Применить».";
+                : $"Записей: {entries.Count}. Значения можно выделить и скопировать. Изменения — «Сохранить».";
         }
         catch (Exception ex)
         {
@@ -52,27 +52,34 @@ public partial class MetadataWindow : Window
 
     private void Add_Click(object sender, RoutedEventArgs e)
     {
-        var row = new MetaEntry { Key = "XMP:Title", Value = "", Editable = true };
+        if (_busy) return;
+        var fields = new[] { ("XMP:Title", "Название"), ("XMP:Description", "Описание"), ("XMP:Creator", "Автор"), ("XMP:Rights", "Авторские права") };
+        var field = fields.FirstOrDefault(f => !_rows.Any(r => r.Key.Equals(f.Item1, StringComparison.OrdinalIgnoreCase)));
+        if (field.Item1 is null) { StatusText.Text = "Основные поля уже добавлены — измените их значения в таблице."; return; }
+        var row = new MetaEntry { Key = field.Item1, Label = field.Item2, Value = "", Editable = true };
+        Track(row);
         _rows.Add(row);
         _dirty = true;
         MetaGrid.SelectedItem = row;
         MetaGrid.ScrollIntoView(row);
         MetaGrid.CurrentCell = new DataGridCellInfo(row, MetaGrid.Columns[1]);
         MetaGrid.BeginEdit();
-        StatusText.Text = "Новая запись добавлена. Укажите ключ и значение, затем «Применить».";
+        StatusText.Text = "Добавлено поле «" + row.Label + "». Введите значение и нажмите «Сохранить».";
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
-        var selected = MetaGrid.SelectedItems.Cast<MetaEntry>().ToList();
+        if (_busy) return;
+        var selected = MetaGrid.SelectedItems.Cast<MetaEntry>().Where(x => x.Editable).ToList();
         if (selected.Count == 0) return;
         foreach (var row in selected) _rows.Remove(row);
         _dirty = true;
-        StatusText.Text = $"Удалено строк: {selected.Count}. Нажмите «Применить», чтобы изменить файл.";
+        StatusText.Text = $"Удалено строк: {selected.Count}. Нажмите «Сохранить», чтобы изменить файл.";
     }
 
     private async void Strip_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
         var choice = MessageBox.Show(this,
             "Удалить из файла всю метаинформацию? Это действие нельзя отменить.",
             "Стереть всё", MessageBoxButton.YesNo, MessageBoxImage.Warning);
@@ -81,7 +88,9 @@ public partial class MetadataWindow : Window
         try
         {
             StatusText.Text = "Удаляю метаданные…";
+            _busy = true; MetaGrid.IsEnabled = false;
             var message = await MetadataService.StripAllAsync(_path);
+            _busy = false;
             await ReloadAsync();
             StatusText.Text = message;
         }
@@ -90,14 +99,19 @@ public partial class MetadataWindow : Window
             MessageBox.Show(this, ex.Message, "Метаданные", MessageBoxButton.OK, MessageBoxImage.Error);
             StatusText.Text = "Не удалось удалить метаданные.";
         }
+        finally { _busy = false; MetaGrid.IsEnabled = true; }
     }
 
     private async void Apply_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
         try
         {
+            _busy = true;
+            MetaGrid.IsEnabled = false;
             StatusText.Text = "Записываю метаданные…";
             var message = await MetadataService.WriteAsync(_path, _rows.ToList(), _original);
+            _busy = false;
             await ReloadAsync();
             StatusText.Text = message;
         }
@@ -106,7 +120,10 @@ public partial class MetadataWindow : Window
             MessageBox.Show(this, ex.Message, "Метаданные", MessageBoxButton.OK, MessageBoxImage.Error);
             StatusText.Text = "Не удалось записать метаданные.";
         }
+        finally { _busy = false; MetaGrid.IsEnabled = true; }
     }
+
+    private void Track(MetaEntry entry) => entry.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MetaEntry.Value)) _dirty = true; };
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
@@ -127,6 +144,7 @@ public partial class MetadataWindow : Window
 
     private void Refresh_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
         if (_dirty)
         {
             var choice = MessageBox.Show(this, "Отменить несохранённые изменения и перечитать файл?",
@@ -158,6 +176,7 @@ public partial class MetadataWindow : Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        if (_busy) { e.Cancel = true; return; }
         if (_dirty)
         {
             var choice = MessageBox.Show(this, "Изменения метаданных не применены. Закрыть окно?",

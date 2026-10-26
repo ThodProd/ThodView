@@ -724,8 +724,9 @@ public partial class MainWindow : Window
     private bool IsZoomedBeyondViewport()
     {
         if (_pixels is null || Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return false;
-        return _width * _scale > Viewport.ActualWidth + 2 ||
-               _height * _scale > Viewport.ActualHeight + 2;
+        var fit = Math.Clamp(Math.Min((Viewport.ActualWidth - 48) / _width,
+            (Viewport.ActualHeight - 48) / _height), MinScale, 16);
+        return _scale > fit + 0.000001;
     }
 
     private void UpdateChromeForView()
@@ -739,9 +740,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        _fadeTimer.Interval = TimeSpan.FromSeconds(1.4);
         _fadeTimer.Stop();
-        _fadeTimer.Start();
+        GearPanel.Visibility = Visibility.Collapsed;
+        if (_toolbarOpen) HideToolbar();
+        foreach (var control in new UIElement[] { GearButton, EditToggleButton })
+        {
+            control.BeginAnimation(OpacityProperty, null);
+            control.Opacity = 0;
+            control.IsHitTestVisible = false;
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -921,6 +928,7 @@ public partial class MainWindow : Window
     private void ShowGear()
     {
         _fadeTimer.Stop();
+        if (IsZoomedBeyondViewport()) return;
         RestoreChrome(GearButton);
         RestoreChrome(EditToggleButton);
         _fadeTimer.Start();

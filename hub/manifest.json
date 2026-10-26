@@ -2,12 +2,27 @@
   "schemaVersion": 1,
   "hubApi": 1,
   "id": "thodview",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "platform": "win-x64",
   "mode": "standalone",
   "launch": {
     "executable": "app/ThodView.exe",
     "arguments": []
   },
-  "permissions": []
+  "permissions": [],
+  "cleanup": {
+    "arguments": [
+      "--uninstall-context"
+    ],
+    "executable": "app/ThodView.exe"
+  },
+  "actions": [
+    {
+      "id": "default-viewer",
+      "label": "Сделать просмотрщиком по умолчанию",
+      "arguments": [
+        "--default-viewer"
+      ]
+    }
+  ]
 }

@@ -170,10 +170,12 @@
               MouseLeftButtonUp="Viewport_MouseLeftButtonUp"
               MouseLeave="Viewport_MouseLeave">
 
+            <Canvas IsHitTestVisible="False">
             <Image x:Name="PreviewImage" Stretch="Fill"
                    HorizontalAlignment="Left" VerticalAlignment="Top"
                    RenderTransformOrigin="0,0" Visibility="Collapsed"
                    RenderOptions.BitmapScalingMode="HighQuality"/>
+            </Canvas>
 
             <Canvas x:Name="CropCanvas" Visibility="Collapsed" IsHitTestVisible="False">
                 <Rectangle x:Name="CropTop" Fill="#7A000000"/>
@@ -191,11 +193,9 @@
                                Foreground="{DynamicResource TextPrimary}" HorizontalAlignment="Center"/>
                     <TextBlock Margin="0,10,0,0" TextAlignment="Center" TextWrapping="Wrap"
                                Foreground="{DynamicResource TextMuted}" FontSize="13"
-                               Text="Перетащите файл в окно или выберите его на диске. PNG, JPEG, WebP, AVIF, TIFF, GIF, BMP, HEIC и другие форматы — через ffmpeg."/>
+                               Text="Перетащите изображение сюда"/>
                     <Button Content="Выбрать файл…" Style="{StaticResource AccentButton}"
                             HorizontalAlignment="Center" Margin="0,20,0,0" Click="Open_Click"/>
-                    <TextBlock Margin="0,16,0,0" TextAlignment="Center" Foreground="{DynamicResource TextMuted}"
-                               FontSize="11.5" Text="Колесо мыши — масштаб к курсору · перетаскивание — панорама"/>
                 </StackPanel>
             </Border>
 

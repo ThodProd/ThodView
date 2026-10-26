@@ -34,8 +34,11 @@ internal sealed class MetaEntry : INotifyPropertyChanged
     }
 
     public bool Editable { get; init; } = true;
+    public bool ReadOnly => !Editable;
+    public string Label { get; init; } = "Поле";
+    public string Hint => Key + (Editable ? " · можно редактировать" : " · свойство файла, только чтение");
 
-    public MetaEntry Clone() => new() { Key = Key, Value = Value, Editable = Editable };
+    public MetaEntry Clone() => new() { Key = Key, Value = Value, Editable = Editable, Label = Label };
 
     public event PropertyChangedEventHandler? PropertyChanged;
 }
@@ -68,7 +71,7 @@ internal static class MetadataService
         var exe = FindExifTool();
         var result = await RunAsync(exe, new[]
         {
-            "-j", "-G1", "-a", "-s", "-charset", "filename=UTF8", "--", path
+            "-j", "-G1", "-a", "-l", "-lang", "ru", "-charset", "filename=UTF8", "--", path
         });
 
         if (result.ExitCode != 0)
@@ -91,10 +94,14 @@ internal static class MetadataService
             var colon = key.IndexOf(':');
             var group = colon > 0 ? key[..colon] : "";
             var tag = colon > 0 ? key[(colon + 1)..] : key;
+            var value = property.Value;
+            var description = value.ValueKind == JsonValueKind.Object && value.TryGetProperty("desc", out var desc)
+                ? desc.GetString() : null;
             entries.Add(new MetaEntry
             {
                 Key = key,
-                Value = JsonText(property.Value),
+                Label = RussianLabel(tag, description),
+                Value = JsonText(value.ValueKind == JsonValueKind.Object && value.TryGetProperty("val", out var val) ? val : value),
                 Editable = IsEditable(group, tag)
             });
         }
@@ -121,6 +128,8 @@ internal static class MetadataService
         var lines = new List<string> { "-overwrite_original" };
         foreach (var pair in currentMap)
         {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(pair.Key, @"^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$"))
+                throw new InvalidDataException("Недопустимое имя поля метаданных.");
             if (!originalMap.TryGetValue(pair.Key, out var oldValue) ||
                 !string.Equals(oldValue, pair.Value, StringComparison.Ordinal))
             {
@@ -143,9 +152,9 @@ internal static class MetadataService
             await File.WriteAllLinesAsync(argumentFile, lines, new UTF8Encoding(false));
             var result = await RunAsync(exe, new[]
             {
-                "-charset", "filename=UTF8", "-@", argumentFile
+                "-lang", "ru", "-charset", "filename=UTF8", "-@", argumentFile
             });
-            if (result.ExitCode != 0)
+            if (result.ExitCode != 0 || !System.Text.RegularExpressions.Regex.IsMatch(result.Output, @"\b[1-9]\d* image files? updated\b"))
             {
                 throw new InvalidOperationException("ExifTool не смог записать метаданные.\n" +
                                                     Tail(result.Error, 6));
@@ -256,7 +265,8 @@ internal static class MetadataService
 
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(120_000))
+        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(120)); }
+        catch (TimeoutException)
         {
             try { process.Kill(true); } catch { }
             throw new TimeoutException("ExifTool не ответил за 120 секунд.");
@@ -266,6 +276,30 @@ internal static class MetadataService
 
     private static string CleanValue(string value) =>
         value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
+
+    private static string RussianLabel(string tag, string? description)
+    {
+        if (description is not null && description.Any(c => c is >= '\u0400' and <= '\u04ff')) return description;
+        return tag switch
+        {
+            "SourceFile" => "Исходный файл", "ExifToolVersion" => "Версия ExifTool",
+            "FileName" => "Имя файла", "Directory" => "Папка", "FileSize" => "Размер файла",
+            "FileModifyDate" => "Дата изменения", "FileAccessDate" => "Дата доступа",
+            "FileCreateDate" => "Дата создания файла", "FilePermissions" => "Права доступа",
+            "FileType" => "Формат файла", "FileTypeExtension" => "Расширение файла", "MIMEType" => "Тип содержимого",
+            "ImageWidth" => "Ширина", "ImageHeight" => "Высота", "ImageSize" => "Размер изображения",
+            "Megapixels" => "Мегапиксели", "ColorType" => "Тип цвета", "BitDepth" => "Глубина цвета",
+            "Compression" => "Сжатие", "Filter" => "Фильтр", "Interlace" => "Чересстрочная развёртка",
+            "Title" => "Название", "Description" => "Описание", "Comment" => "Комментарий",
+            "Author" or "Artist" or "Creator" => "Автор", "Copyright" or "Rights" => "Авторские права",
+            "Software" => "Программа", "CreateDate" => "Дата создания", "ModifyDate" => "Дата изменения",
+            "DateTimeOriginal" => "Дата съёмки", "Make" => "Производитель", "Model" => "Модель камеры",
+            "Orientation" => "Ориентация", "ColorSpace" => "Цветовое пространство",
+            "XResolution" => "Разрешение по горизонтали", "YResolution" => "Разрешение по вертикали",
+            "ResolutionUnit" => "Единица разрешения", "XMPToolkit" => "Версия обработчика XMP",
+            _ => "Дополнительное поле · " + tag
+        };
+    }
 
     private static string Tail(string text, int lines)
     {

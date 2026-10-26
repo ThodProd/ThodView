@@ -125,7 +125,7 @@
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Style="{StaticResource DialogButton}" Content="Обновить" Click="Refresh_Click"/>
-                    <Button Style="{StaticResource AccentDialogButton}" Content="Применить" Click="Apply_Click"/>
+                    <Button Style="{StaticResource AccentDialogButton}" Content="Сохранить" Click="Apply_Click"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -145,10 +145,18 @@
                   CellEditEnding="MetaGrid_CellEditEnding"
                   Margin="0">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Ключ" Binding="{Binding Key, UpdateSourceTrigger=PropertyChanged}"
-                                    Width="245" IsReadOnly="False"/>
-                <DataGridTextColumn Header="Значение" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
-                                    Width="*" IsReadOnly="False"/>
+                <DataGridTemplateColumn Header="Свойство" Width="245" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                        <TextBlock Text="{Binding Label}" ToolTip="{Binding Hint}" VerticalAlignment="Center" Margin="6,0"/>
+                    </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Значение" Width="*">
+                    <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                        <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding ReadOnly}"
+                                 ToolTip="{Binding Hint}" BorderThickness="0" Background="Transparent"
+                                 Foreground="{DynamicResource TextPrimary}" Padding="6,3" VerticalContentAlignment="Center"/>
+                    </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -158,9 +166,6 @@
                 <TextBlock x:Name="StatusText" Text="Загрузка…" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextMuted}" FontSize="11.5"
                            TextTrimming="CharacterEllipsis"/>
-                <TextBlock Text="Ключ можно писать как EXIF:Artist, XMP:Title или IPTC:Keywords"
-                           HorizontalAlignment="Right" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextMuted}" FontSize="10.5"/>
             </Grid>
         </Border>
     </Grid>
