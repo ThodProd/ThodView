@@ -79,7 +79,8 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXIT
 
 # --- manifest ---------------------------------------------------------------
 $manifest.version = $Version
-$manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding utf8
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), ($manifest | ConvertTo-Json -Depth 10), $utf8NoBom)
 
 # --- docs / licenses --------------------------------------------------------
 foreach ($file in 'README.md', 'THIRD-PARTY-NOTICES.md', 'LICENSE') {
