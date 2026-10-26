@@ -71,12 +71,24 @@ public partial class MainWindow : Window
         _fadeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
         _fadeTimer.Tick += (_, _) =>
         {
-            if (GearPanel.Visibility == Visibility.Visible || GearButton.IsMouseOver) return;
-            var animation = new DoubleAnimation(0.18, TimeSpan.FromMilliseconds(650))
+            if (GearPanel.Visibility == Visibility.Visible ||
+                GearButton.IsMouseOver || EditToggleButton.IsMouseOver || EditToolbar.IsMouseOver)
             {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-            };
-            GearButton.BeginAnimation(OpacityProperty, animation);
+                _fadeTimer.Start();
+                return;
+            }
+
+            if (IsZoomedBeyondViewport())
+            {
+                FadeChrome(GearButton, 0);
+                FadeChrome(EditToggleButton, 0);
+                if (_toolbarOpen) HideToolbar();
+            }
+            else
+            {
+                FadeChrome(GearButton, 0.18);
+                RestoreChrome(EditToggleButton);
+            }
         };
 
         PreviewImage.RenderTransform = new MatrixTransform();
@@ -321,7 +333,7 @@ public partial class MainWindow : Window
     {
         if (_pixels is null || !IsLoaded) return;
         if (_fitMode) FitToWindow();
-        else { ClampOffsets(); UpdateTransform(); }
+        else UpdateTransform();
     }
 
     private void FitToWindow()
@@ -348,7 +360,6 @@ public partial class MainWindow : Window
         _offsetX = vw / 2 - _width / 2d;
         _offsetY = vh / 2 - _height / 2d;
         _fitMode = false;
-        ClampOffsets();
         UpdateTransform();
     }
 
@@ -369,19 +380,7 @@ public partial class MainWindow : Window
         _offsetX = point.X - imageX * next;
         _offsetY = point.Y - imageY * next;
         _fitMode = false;
-        ClampOffsets();
         UpdateTransform();
-    }
-
-    private void ClampOffsets()
-    {
-        var vw = Viewport.ActualWidth;
-        var vh = Viewport.ActualHeight;
-        if (vw < 1 || vh < 1) return;
-        var dw = _width * _scale;
-        var dh = _height * _scale;
-        _offsetX = dw <= vw ? (vw - dw) / 2 : Math.Clamp(_offsetX, vw - dw, 0);
-        _offsetY = dh <= vh ? (vh - dh) / 2 : Math.Clamp(_offsetY, vh - dh, 0);
     }
 
     private void UpdateTransform()
@@ -394,6 +393,7 @@ public partial class MainWindow : Window
         PreviewImage.RenderTransform = new MatrixTransform(matrix);
         UpdateZoomText();
         HideToolbarIfFitted();
+        UpdateChromeForView();
     }
 
     private Rect ImageRect() => new(_offsetX, _offsetY, _width * _scale, _height * _scale);
@@ -448,7 +448,6 @@ public partial class MainWindow : Window
         if (!_panning) return;
         _offsetX = _panOffsetX + (point.X - _panStart.X);
         _offsetY = _panOffsetY + (point.Y - _panStart.Y);
-        ClampOffsets();
         UpdateTransform();
     }
 
@@ -722,6 +721,29 @@ public partial class MainWindow : Window
         if (_toolbarOpen && IsImageFullyVisible()) HideToolbar();
     }
 
+    private bool IsZoomedBeyondViewport()
+    {
+        if (_pixels is null || Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return false;
+        return _width * _scale > Viewport.ActualWidth + 2 ||
+               _height * _scale > Viewport.ActualHeight + 2;
+    }
+
+    private void UpdateChromeForView()
+    {
+        if (!IsZoomedBeyondViewport())
+        {
+            if (EditToggleButton.Visibility == Visibility.Visible && EditToggleButton.Opacity < 0.5)
+                RestoreChrome(EditToggleButton);
+            if (GearButton.Opacity < 0.17) RestoreChrome(GearButton);
+            _fadeTimer.Interval = TimeSpan.FromSeconds(2.4);
+            return;
+        }
+
+        _fadeTimer.Interval = TimeSpan.FromSeconds(1.4);
+        _fadeTimer.Stop();
+        _fadeTimer.Start();
+    }
+
     /* ------------------------------------------------------------------ */
     /* Saving                                                              */
     /* ------------------------------------------------------------------ */
@@ -899,9 +921,26 @@ public partial class MainWindow : Window
     private void ShowGear()
     {
         _fadeTimer.Stop();
-        GearButton.BeginAnimation(OpacityProperty, null);
-        GearButton.Opacity = 1;
+        RestoreChrome(GearButton);
+        RestoreChrome(EditToggleButton);
         _fadeTimer.Start();
+    }
+
+    private void FadeChrome(UIElement element, double target)
+    {
+        element.IsHitTestVisible = target > 0.001;
+        var animation = new DoubleAnimation(target, TimeSpan.FromMilliseconds(target <= 0.001 ? 450 : 650))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        element.BeginAnimation(OpacityProperty, animation);
+    }
+
+    private void RestoreChrome(UIElement element)
+    {
+        element.BeginAnimation(OpacityProperty, null);
+        element.Opacity = 1;
+        element.IsHitTestVisible = true;
     }
 
     private void Theme_Click(object sender, RoutedEventArgs e)

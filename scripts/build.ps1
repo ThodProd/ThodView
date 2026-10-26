@@ -140,7 +140,7 @@ if (-not $SkipPackage) {
         -PackageDirectory $stage `
         -Repository 'ThodProd/ThodView' `
         -OutputDirectory $OutputDirectory `
-        -Notes "ThodView $Version - fast standalone image viewer with folder navigation and metadata editing."
+        -Notes "ThodView $Version - fast standalone image viewer with free panning, folder navigation and metadata editing."
     if (-not $zip -or -not (Test-Path -LiteralPath $zip)) { throw 'Packaging failed: ZIP was not produced.' }
 
     $releasePath = Join-Path $OutputDirectory 'thodhub-release.json'
