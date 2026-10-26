@@ -1,0 +1,25 @@
+FFmpeg corresponding source offer
+
+The ThodView package bundles ffmpeg 9.0.2 essentials (win-x64), built by
+Gyan Doshi from https://www.gyan.dev/ffmpeg/builds/ with GPLv3 enabled.
+
+Corresponding source code for ffmpeg 9.0.2:
+
+  https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+  https://github.com/FFmpeg/FFmpeg/tree/n9.0.2
+
+Build configuration and binaries:
+
+  https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip
+
+The complete license text is in `licenses/ffmpeg-COPYING.txt` next to this
+notice. The source archive is distributed by the FFmpeg project under the
+GNU GPL; ThodView does not modify ffmpeg.
+
+ExifTool 13.59 source code:
+
+  https://exiftool.org/
+  https://github.com/exiftool/exiftool
+
+ExifTool is licensed under GPLv3; its license text is in
+`licenses/exiftool-COPYING.txt`.

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "hubApi": 1,
+  "id": "thodview",
+  "version": "1.0.0",
+  "platform": "win-x64",
+  "mode": "standalone",
+  "launch": {
+    "executable": "app/ThodView.exe",
+    "arguments": []
+  },
+  "permissions": []
+}
