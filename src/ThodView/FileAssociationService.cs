@@ -48,6 +48,7 @@ internal static class FileAssociationService
             {
                 command.SetValue(null, commandLine);
             }
+            using(var icon=application.CreateSubKey("DefaultIcon",true)!)icon.SetValue(null,$"\"{exe}\",0");
             using (var supported = application.CreateSubKey("SupportedTypes", true)!)
             {
                 foreach (var extension in ImageFormats.AssociableExtensions)
@@ -79,7 +80,7 @@ internal static class FileAssociationService
         {
             using var extensionKey = classes.CreateSubKey(extension, true)!;
             using var openWith = extensionKey.CreateSubKey("OpenWithProgids", true)!;
-            openWith.SetValue(ProgId, "", RegistryValueKind.String);
+            openWith.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
         }
 
         SHChangeNotify(0x08000000, 0x0000, IntPtr.Zero, IntPtr.Zero);

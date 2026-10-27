@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "hubApi": 1,
   "id": "thodview",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "platform": "win-x64",
   "mode": "standalone",
   "launch": {
@@ -22,7 +22,14 @@
       "label": "Сделать просмотрщиком по умолчанию",
       "arguments": [
         "--default-viewer"
-      ]
+      ],
+      "waitForExit": true
     }
-  ]
+  ],
+  "integration": {
+    "arguments": [
+      "--register-integrations"
+    ],
+    "executable": "app/ThodView.exe"
+  }
 }
