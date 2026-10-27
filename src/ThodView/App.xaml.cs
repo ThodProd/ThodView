@@ -8,7 +8,6 @@ public partial class App : Application
     {
         if (e.Args.Contains("--default-viewer") || e.Args.Contains("--uninstall-context") || e.Args.Contains("--register-integrations"))
         {
-            StartupUri = null;
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             try
             {
@@ -20,6 +19,7 @@ public partial class App : Application
             return;
         }
         base.OnStartup(e);
+        MainWindow=new MainWindow();MainWindow.Show();
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
             var error = args.ExceptionObject as Exception;
