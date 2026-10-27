@@ -56,7 +56,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _dataDir = Environment.GetEnvironmentVariable("THODHUB_DATA_DIR")
-                   ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ThodView");
+                   ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ThodHUB", "Data", "thodview");
         Directory.CreateDirectory(_dataDir);
         _settingsPath = Path.Combine(_dataDir, "settings.json");
         _settings = AppSettings.Load(_settingsPath);

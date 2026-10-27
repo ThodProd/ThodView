@@ -19,9 +19,10 @@ internal static class FileAssociationService
             throw new InvalidOperationException("Не удалось определить путь к ThodView.exe.");
         }
 
-        var launcher = Environment.GetEnvironmentVariable("THODHUB_LAUNCHER");
-        var commandLine = !string.IsNullOrWhiteSpace(launcher) && File.Exists(launcher)
-            ? $"\"{launcher}\" --launch thodview \"%1\"" : $"\"{exe}\" \"%1\"";
+        // Open With identifies/deduplicates applications by the command executable.
+        // A shared hub launcher makes Windows display ThodHUB instead of ThodView.
+        // Integration is renewed on every update, so this installed executable stays current.
+        var commandLine = $"\"{exe}\" \"%1\"";
         using var classes = Registry.CurrentUser.CreateSubKey(@"Software\Classes", true)
                             ?? throw new InvalidOperationException("Нет доступа к HKEY_CURRENT_USER\\Software\\Classes.");
 
@@ -30,6 +31,12 @@ internal static class FileAssociationService
             prog.SetValue(null, "Изображение ThodView");
             prog.SetValue("ThodHUB.Owner", Owner);
             prog.SetValue("FriendlyTypeName", "Изображение ThodView");
+            using(var app=prog.CreateSubKey("Application",true)!)
+            {
+                app.SetValue("ApplicationName",AppName);
+                app.SetValue("ApplicationDescription","Просмотр изображений");
+                app.SetValue("ApplicationIcon",$"\"{exe}\",0");
+            }
             using (var icon = prog.CreateSubKey("DefaultIcon", true)!)
             {
                 icon.SetValue(null, $"\"{exe}\",0");
