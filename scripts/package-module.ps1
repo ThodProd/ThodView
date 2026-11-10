@@ -5,7 +5,7 @@ param(
     [string]$Notes = 'Первый выпуск для ThodHUB.'
 )
 $ErrorActionPreference = 'Stop'
-$manifest = Get-Content -LiteralPath (Join-Path $PackageDirectory 'manifest.json') -Raw | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath (Join-Path $PackageDirectory 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($manifest.version -notmatch '^\d+\.\d+\.\d+$' -or $manifest.id -notmatch '^[a-z][a-z0-9-]+$') { throw 'Invalid manifest' }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).Path

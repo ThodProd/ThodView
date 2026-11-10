@@ -16,6 +16,7 @@ param(
     [string]$OutputDirectory = '',
     [string]$FfmpegZip = '',
     [string]$ExifToolZip = '',
+    [string]$Notes = '',
     [switch]$SkipPackage
 )
 
@@ -23,9 +24,10 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'artifacts' }
 $manifestPath = Join-Path $root 'hub\manifest.json'
-$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
 if (-not $Version) { $Version = $manifest.version }
+if (-not $Notes) { $Notes = "ThodView $Version - offline image viewer with folder navigation, editing and metadata for ThodHUB." }
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
     throw "Version must look like 1.2.3, got '$Version'."
 }
@@ -141,7 +143,7 @@ if (-not $SkipPackage) {
         -PackageDirectory $stage `
         -Repository 'ThodProd/ThodView' `
         -OutputDirectory $OutputDirectory `
-        -Notes "ThodView $Version - fast standalone image viewer with free panning, folder navigation and metadata editing."
+        -Notes $Notes
     if (-not $zip -or -not (Test-Path -LiteralPath $zip)) { throw 'Packaging failed: ZIP was not produced.' }
 
     $releasePath = Join-Path $OutputDirectory 'thodhub-release.json'
