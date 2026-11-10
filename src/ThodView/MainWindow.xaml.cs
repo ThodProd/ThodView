@@ -343,7 +343,9 @@ public partial class MainWindow : Window
         var vh = Viewport.ActualHeight;
         if (vw < 8 || vh < 8) return;
 
-        var scale = Math.Min((vw - 48) / _width, (vh - 48) / _height);
+        // Fit against the actual viewport.  The former 24px inset on every
+        // side made the canvas show a frame around every image.
+        var scale = Math.Min(vw / _width, vh / _height);
         _scale = Math.Clamp(scale, MinScale, 16);
         _offsetX = (vw - _width * _scale) / 2;
         _offsetY = (vh - _height * _scale) / 2;
@@ -356,7 +358,7 @@ public partial class MainWindow : Window
         if (_pixels is null) return;
         var vw = Viewport.ActualWidth;
         var vh = Viewport.ActualHeight;
-        _scale = 1;
+        _scale = Math.Max(1, MinimumScaleForViewport());
         _offsetX = vw / 2 - _width / 2d;
         _offsetY = vh / 2 - _height / 2d;
         _fitMode = false;
@@ -372,7 +374,9 @@ public partial class MainWindow : Window
     private void ZoomAt(Point point, double factor)
     {
         if (_pixels is null) return;
-        var next = Math.Clamp(_scale * factor, MinScale, MaxScale);
+        // The initial fit is the minimum zoom.  This prevents a wheel or the
+        // minus key from shrinking the image into a floating, off-centre view.
+        var next = Math.Clamp(_scale * factor, MinimumScaleForViewport(), MaxScale);
         if (Math.Abs(next - _scale) < 0.000001) return;
         var imageX = (point.X - _offsetX) / _scale;
         var imageY = (point.Y - _offsetY) / _scale;
@@ -385,6 +389,7 @@ public partial class MainWindow : Window
 
     private void UpdateTransform()
     {
+        ClampOffsetToViewport();
         PreviewImage.Width = _width;
         PreviewImage.Height = _height;
         var matrix = Matrix.Identity;
@@ -397,6 +402,30 @@ public partial class MainWindow : Window
     }
 
     private Rect ImageRect() => new(_offsetX, _offsetY, _width * _scale, _height * _scale);
+
+    private double MinimumScaleForViewport()
+    {
+        if (_pixels is null || Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return MinScale;
+        return Math.Clamp(Math.Min(Viewport.ActualWidth / _width, Viewport.ActualHeight / _height), MinScale, 16);
+    }
+
+    private void ClampOffsetToViewport()
+    {
+        if (_pixels is null) return;
+
+        var viewportWidth = Viewport.ActualWidth;
+        var viewportHeight = Viewport.ActualHeight;
+        if (viewportWidth < 1 || viewportHeight < 1) return;
+
+        var imageWidth = _width * _scale;
+        var imageHeight = _height * _scale;
+        _offsetX = imageWidth <= viewportWidth
+            ? (viewportWidth - imageWidth) / 2
+            : Math.Clamp(_offsetX, viewportWidth - imageWidth, 0);
+        _offsetY = imageHeight <= viewportHeight
+            ? (viewportHeight - imageHeight) / 2
+            : Math.Clamp(_offsetY, viewportHeight - imageHeight, 0);
+    }
 
     /* ------------------------------------------------------------------ */
     /* Mouse input                                                         */
@@ -724,9 +753,7 @@ public partial class MainWindow : Window
     private bool IsZoomedBeyondViewport()
     {
         if (_pixels is null || Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return false;
-        var fit = Math.Clamp(Math.Min((Viewport.ActualWidth - 48) / _width,
-            (Viewport.ActualHeight - 48) / _height), MinScale, 16);
-        return _scale > fit + 0.000001;
+        return _scale > MinimumScaleForViewport() + 0.000001;
     }
 
     private void UpdateChromeForView()

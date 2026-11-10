@@ -6,8 +6,8 @@ namespace ThodView;
 public sealed class AppSettings
 {
     public string Theme { get; set; } = "auto";
-    public double Width { get; set; } = 1120;
-    public double Height { get; set; } = 760;
+    public double Width { get; set; } = 1440;
+    public double Height { get; set; } = 900;
     public bool Maximized { get; set; }
 
     public static AppSettings Load(string path)

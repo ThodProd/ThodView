@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="ThodView"
-        Width="1120" Height="760"
+        Width="1440" Height="900"
         MinWidth="620" MinHeight="420"
         WindowStyle="None"
         ResizeMode="CanResize"
