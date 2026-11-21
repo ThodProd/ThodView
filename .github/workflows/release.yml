@@ -42,8 +42,20 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ThodView-Windows-x64
-          path: artifacts/thodview-*-win-x64.zip
+          path: |
+            artifacts/thodview-*-win-x64.zip
+            artifacts/hub/
           if-no-files-found: error
+
+      - name: Publish ThodHUB release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $tag = "hub-v$version"
+          gh release create $tag "artifacts/hub/thodview-$version-win-x64.zip" "artifacts/hub/thodhub-release.json" --target $env:GITHUB_SHA --latest=false --title "ThodView $version для ThodHUB" --notes "Версия на Rust для установки и обновления через ThodHUB."
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Publish GitHub release
         if: github.ref_type == 'tag'

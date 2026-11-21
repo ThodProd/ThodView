@@ -83,7 +83,7 @@ impl Settings {
             .and_then(read)
             .or_else(|| {
                 let base = std::env::var_os("LOCALAPPDATA")?;
-                read(PathBuf::from(base).join("ThodHUB/Data/thodview/settings.json"))
+                read(PathBuf::from(base).join("ThodView/settings.json"))
             })
             .unwrap_or_default()
     }
@@ -102,7 +102,10 @@ impl Settings {
 }
 
 fn settings_path() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("ThodView/settings.json"))
+    Some(
+        PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+            .join("ThodHUB/Data/thodview/settings.json"),
+    )
 }
 
 #[derive(Clone, Copy)]

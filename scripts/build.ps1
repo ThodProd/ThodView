@@ -13,12 +13,16 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'artifacts' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $cache = Join-Path $root '.cache'
-if (-not $Version) {
-    $manifest = Get-Content -LiteralPath (Join-Path $root 'Cargo.toml') -Raw
-    $Version = [regex]::Match($manifest, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
-}
+$cargoManifest = Get-Content -LiteralPath (Join-Path $root 'Cargo.toml') -Raw
+$cargoVersion = [regex]::Match($cargoManifest, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
+if (-not $Version) { $Version = $cargoVersion }
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
     throw "Invalid version '$Version'."
+}
+$hubManifestPath = Join-Path $root 'hub\manifest.json'
+$hubManifest = Get-Content -LiteralPath $hubManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($Version -cne $cargoVersion -or $Version -cne $hubManifest.version) {
+    throw "Release version '$Version' must match Cargo.toml and hub/manifest.json."
 }
 
 $cargo = Get-Command cargo -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -120,5 +124,39 @@ if (-not $SkipPackage) {
         if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
     }
     Get-FileHash -LiteralPath $file
+
+    $hubOut = Join-Path $OutputDirectory 'hub'
+    New-Item -ItemType Directory -Path $hubOut -Force | Out-Null
+    $hubFile = Join-Path $hubOut "$name.zip"
+    $pending = Join-Path $hubOut "$name.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $archive = [IO.Compression.ZipFile]::Open($pending, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            $compression = [IO.Compression.CompressionLevel]::Optimal
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $hubManifestPath, 'manifest.json', $compression)
+            foreach ($item in Get-ChildItem -LiteralPath $stage -File -Recurse) {
+                $relative = $item.FullName.Substring($stage.Length + 1).Replace('\', '/')
+                if ($relative -eq 'ThodView.exe' -or $relative.StartsWith('runtime/')) {
+                    $relative = "app/$relative"
+                }
+                [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $item.FullName, $relative, $compression)
+            }
+        } finally { $archive.Dispose() }
+        Move-Item -LiteralPath $pending -Destination $hubFile -Force
+    } finally {
+        if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
+    }
+
+    $descriptor = [ordered]@{
+        version = $Version
+        packageUrl = "https://github.com/ThodProd/ThodView/releases/download/hub-v$Version/$name.zip"
+        sha256 = (Get-FileHash -LiteralPath $hubFile).Hash.ToLowerInvariant()
+        size = (Get-Item -LiteralPath $hubFile).Length
+        notes = 'Версия на Rust с поддержкой установки и обновления через ThodHUB. Просмотрщик открывается в отдельном окне.'
+        platform = $hubManifest.platform
+        hubApi = $hubManifest.hubApi
+    }
+    $descriptor | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $hubOut 'thodhub-release.json') -Encoding utf8NoBOM
+    Write-Host "ThodHUB package: $hubFile"
 }
 Write-Host "ThodView: $(Join-Path $stage 'ThodView.exe')"

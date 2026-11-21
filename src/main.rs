@@ -11,20 +11,26 @@ use eframe::egui::{IconData, ViewportBuilder};
 use std::{ffi::OsStr, path::PathBuf};
 
 fn main() {
-    if let Err(error) = run() {
+    let first = std::env::args_os().nth(1);
+    let hub_hook = matches!(
+        first.as_deref().and_then(OsStr::to_str),
+        Some("--register-integrations" | "--uninstall-context" | "--default-viewer")
+    );
+    if let Err(error) = run(first) {
         let message = error.to_string();
         eprintln!("{message}");
-        rfd::MessageDialog::new()
-            .set_title("ThodView")
-            .set_description(message)
-            .set_level(rfd::MessageLevel::Error)
-            .show();
+        if !hub_hook {
+            rfd::MessageDialog::new()
+                .set_title("ThodView")
+                .set_description(message)
+                .set_level(rfd::MessageLevel::Error)
+                .show();
+        }
         std::process::exit(1);
     }
 }
 
-fn run() -> process::Result<()> {
-    let first = std::env::args_os().nth(1);
+fn run(first: Option<std::ffi::OsString>) -> process::Result<()> {
     let settings = ui::Settings::load();
     match first.as_deref().and_then(OsStr::to_str) {
         Some("--register-integrations") => return shell::register(settings.context_menu, true),
