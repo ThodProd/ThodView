@@ -2563,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "thodview"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "eframe",
  "embed-resource",
@@ -2571,6 +2571,7 @@ dependencies = [
  "image",
  "jxl-oxide",
  "moxcms",
+ "raw-window-handle",
  "resvg",
  "rfd",
  "serde",

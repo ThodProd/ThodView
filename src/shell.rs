@@ -1,15 +1,86 @@
 use crate::{decode::EXTENSIONS, process::Result};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{ffi::OsStr, io, os::windows::ffi::OsStrExt, path::Path};
 use windows::{
     Win32::{
+        Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
         System::Com::{
             CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
             CoUninitialize, IPersistFile, STGM_READ,
         },
-        UI::{Shell::*, WindowsAndMessaging::SW_SHOWNORMAL},
+        UI::{
+            HiDpi::GetDpiForWindow,
+            Shell::*,
+            WindowsAndMessaging::{
+                GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP,
+                HTTOPLEFT, HTTOPRIGHT, IsZoomed, SW_SHOWNORMAL, WM_NCDESTROY, WM_NCHITTEST,
+            },
+        },
     },
     core::{Interface, PCWSTR, w},
 };
+
+pub fn enable_border_resize(window: &impl HasWindowHandle) {
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+            // The subclass is installed and removed on the window's GUI thread.
+            unsafe {
+                let _ = SetWindowSubclass(HWND(handle.hwnd.get() as _), Some(resize_border), 0, 0);
+            }
+        }
+    }
+}
+
+unsafe extern "system" fn resize_border(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    id: usize,
+    _: usize,
+) -> LRESULT {
+    if message == WM_NCDESTROY {
+        unsafe {
+            let _ = RemoveWindowSubclass(hwnd, Some(resize_border), id);
+        }
+    }
+    if message == WM_NCHITTEST && !unsafe { IsZoomed(hwnd) }.as_bool() {
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
+            // Coordinates in WM_NCHITTEST are signed screen pixels.
+            let x = lparam.0 as i16 as i32;
+            let y = (lparam.0 >> 16) as i16 as i32;
+            let edge = (unsafe { GetDpiForWindow(hwnd) } as i32 * 6 / 96).max(1);
+            let horizontal = if x < rect.left + edge {
+                -1
+            } else if x >= rect.right - edge {
+                1
+            } else {
+                0
+            };
+            let vertical = if y < rect.top + edge {
+                -1
+            } else if y >= rect.bottom - edge {
+                1
+            } else {
+                0
+            };
+            let hit = match (horizontal, vertical) {
+                (-1, -1) => HTTOPLEFT,
+                (1, -1) => HTTOPRIGHT,
+                (-1, 1) => HTBOTTOMLEFT,
+                (1, 1) => HTBOTTOMRIGHT,
+                (-1, _) => HTLEFT,
+                (1, _) => HTRIGHT,
+                (_, -1) => HTTOP,
+                (_, 1) => HTBOTTOM,
+                _ => return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) },
+            };
+            return LRESULT(hit as isize);
+        }
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
 use winreg::{
     RegKey, RegValue,
     enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_NONE},

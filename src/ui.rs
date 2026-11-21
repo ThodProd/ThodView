@@ -1,6 +1,7 @@
 use crate::{
     decode::{self, Picture},
     metadata::{self, Tag},
+    ocr::{self, OcrLanguage, Word},
     process::Result,
     shell,
     view::View,
@@ -19,7 +20,12 @@ use std::{
 };
 
 const TILE: u32 = 1024;
+const TILE_GUTTER: u32 = 4;
 const PREVIEW_SIDE: u32 = 3072;
+const PHOTO_SAMPLING: TextureOptions = TextureOptions {
+    mipmap_mode: Some(egui::TextureFilter::Linear),
+    ..TextureOptions::LINEAR
+};
 const TITLE: f32 = 44.0;
 const STATUS: f32 = 30.0;
 
@@ -183,7 +189,7 @@ fn preview(image: &RgbaImage) -> Option<RgbaImage> {
         image,
         (image.width() as f64 * ratio).round().max(1.0) as u32,
         (image.height() as f64 * ratio).round().max(1.0) as u32,
-        image::imageops::FilterType::Triangle,
+        image::imageops::FilterType::CatmullRom,
     ))
 }
 
@@ -229,14 +235,7 @@ impl Textures {
         let pixels = preview.unwrap_or(image);
         let maximum = ctx.input(|i| i.max_texture_side);
         self.overview = if (pixels.width().max(pixels.height()) as usize) <= maximum {
-            Some(ctx.load_texture(
-                "Изображение",
-                color_image(pixels),
-                TextureOptions {
-                    magnification: egui::TextureFilter::Nearest,
-                    ..TextureOptions::LINEAR
-                },
-            ))
+            Some(ctx.load_texture("Изображение", color_image(pixels), PHOTO_SAMPLING))
         } else {
             None
         };
@@ -267,7 +266,8 @@ impl Textures {
         let from = ((visible.min - rect.min) / scale).max(Vec2::ZERO);
         let to = (visible.max - rect.min) / scale;
         let max_texture = ui.ctx().input(|i| i.max_texture_side) as u32;
-        let tile = TILE.min(max_texture.max(1));
+        let gutter = TILE_GUTTER.min(max_texture.saturating_sub(1) / 2);
+        let tile = TILE.min(max_texture.saturating_sub(2 * gutter).max(1));
         let x0 = from.x as u32 / tile;
         let y0 = from.y as u32 / tile;
         let x1 = (to.x.ceil() as u32).min(image.width()).div_ceil(tile);
@@ -282,27 +282,34 @@ impl Textures {
                 let top = y * tile;
                 let w = tile.min(image.width() - left);
                 let h = tile.min(image.height() - top);
+                // Neighboring pixels let the sampler filter across a tile boundary.
+                let sample_left = left.saturating_sub(gutter);
+                let sample_top = top.saturating_sub(gutter);
+                let sample_w = (left + w + gutter).min(image.width()) - sample_left;
+                let sample_h = (top + h + gutter).min(image.height()) - sample_top;
                 let texture = self.tiles.entry((x, y)).or_insert_with(|| {
-                    let part = image::imageops::crop_imm(image, left, top, w, h).to_image();
-                    ui.ctx().load_texture(
-                        "Участок изображения",
-                        color_image(&part),
-                        TextureOptions {
-                            magnification: egui::TextureFilter::Nearest,
-                            ..TextureOptions::LINEAR
-                        },
+                    let part = image::imageops::crop_imm(
+                        image,
+                        sample_left,
+                        sample_top,
+                        sample_w,
+                        sample_h,
                     )
+                    .to_image();
+                    ui.ctx()
+                        .load_texture("Участок изображения", color_image(&part), PHOTO_SAMPLING)
                 });
                 let tile_rect = Rect::from_min_size(
                     rect.min + vec2(left as f32, top as f32) * scale,
                     vec2(w as f32, h as f32) * scale,
                 );
-                painter.image(
-                    texture.id(),
-                    tile_rect,
-                    Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-                    Color32::WHITE,
+                let uv_size = vec2(sample_w as f32, sample_h as f32);
+                let uv = Rect::from_min_size(
+                    (vec2((left - sample_left) as f32, (top - sample_top) as f32) / uv_size)
+                        .to_pos2(),
+                    vec2(w as f32, h as f32) / uv_size,
                 );
+                painter.image(texture.id(), tile_rect, uv, Color32::WHITE);
             }
         }
     }
@@ -360,9 +367,47 @@ pub struct Viewer {
     tools: bool,
     crop: bool,
     selection: Option<(Pos2, Pos2)>,
+    ocr: Option<OcrSelection>,
+    ocr_language: OcrLanguage,
     meta: Option<MetaPanel>,
     status: String,
     error: Option<String>,
+}
+
+struct OcrSelection {
+    pending: Option<Receiver<Result<Vec<Vec<Word>>>>>,
+    lines: Vec<Vec<Word>>,
+    area: Option<(Pos2, Pos2)>,
+    dragging: bool,
+    message: String,
+}
+
+impl OcrSelection {
+    fn contains(&self, word: &Word) -> bool {
+        self.area.is_some_and(|(start, end)| {
+            if start == end {
+                word.bounds.contains(start)
+            } else {
+                word.bounds.intersects(Rect::from_two_pos(start, end))
+            }
+        })
+    }
+
+    fn selected_text(&self) -> String {
+        self.lines
+            .iter()
+            .filter_map(|line| {
+                let text = line
+                    .iter()
+                    .filter(|word| self.contains(word))
+                    .map(|word| word.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                (!text.is_empty()).then_some(text)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 #[derive(Clone)]
@@ -386,6 +431,7 @@ impl Viewer {
         };
         let palette = Palette::new(light);
         set_style(&cc.egui_ctx, light, palette);
+        shell::enable_border_resize(cc);
         let mut this = Self {
             settings,
             palette,
@@ -407,6 +453,8 @@ impl Viewer {
             tools: false,
             crop: false,
             selection: None,
+            ocr: None,
+            ocr_language: OcrLanguage::default(),
             meta: None,
             status: String::new(),
             error: integration_error,
@@ -446,6 +494,7 @@ impl Viewer {
         self.tools = false;
         self.crop = false;
         self.selection = None;
+        self.ocr = None;
         self.meta = None;
         self.load = Some(job(ctx, move || {
             let path = std::path::absolute(path)?;
@@ -563,6 +612,7 @@ impl Viewer {
         self.status.clear();
         self.crop = false;
         self.selection = None;
+        self.ocr = None;
         self.refresh_texture(ctx);
         if let Some(size) = self.size() {
             self.view.fit(self.canvas, size);
@@ -572,6 +622,7 @@ impl Viewer {
 
     fn toggle_crop(&mut self) {
         if self.loaded.is_some() {
+            self.ocr = None;
             self.crop = !self.crop;
             self.selection = None;
         }
@@ -611,6 +662,19 @@ impl Viewer {
     }
 
     fn receive(&mut self, ctx: &Context) {
+        if let Some(ocr) = &mut self.ocr {
+            if let Some(Ok(result)) = ocr.pending.as_ref().map(Receiver::try_recv) {
+                ocr.pending = None;
+                ocr.message = match result {
+                    Ok(lines) if lines.is_empty() => "Текст не найден".into(),
+                    Ok(lines) => {
+                        ocr.lines = lines;
+                        "Выделите текст • Ctrl+C — копировать • Esc — выйти".into()
+                    }
+                    Err(err) => err.to_string(),
+                };
+            }
+        }
         if let Some(Ok(result)) = self.load.as_ref().map(Receiver::try_recv) {
             self.load = None;
             match result {
@@ -667,7 +731,12 @@ impl Viewer {
         let Some(deadline) = self.deadline else {
             return;
         };
-        if self.animation_paused || self.crop || self.busy() || self.meta.is_some() {
+        if self.animation_paused
+            || self.crop
+            || self.ocr.is_some()
+            || self.busy()
+            || self.meta.is_some()
+        {
             return;
         }
         let Some(loaded) = &mut self.loaded else {
@@ -701,6 +770,25 @@ impl Viewer {
         if let Some(path) = self.path() {
             self.meta = Some(MetaPanel::new(ctx, path.to_owned()));
         }
+    }
+
+    fn start_ocr(&mut self, ctx: &Context) {
+        let Some(loaded) = &self.loaded else { return };
+        let image = loaded
+            .preview
+            .as_ref()
+            .unwrap_or(&loaded.picture.frames[self.frame].image)
+            .clone();
+        let language = self.ocr_language;
+        self.tools = false;
+        self.menu = false;
+        self.ocr = Some(OcrSelection {
+            pending: Some(job(ctx, move || ocr::recognize(image, language))),
+            lines: Vec::new(),
+            area: None,
+            dragging: false,
+            message: "Распознаю текст…".into(),
+        });
     }
 
     fn reveal(&mut self) {
@@ -959,7 +1047,7 @@ impl Viewer {
     fn chrome(&mut self, ctx: &Context, canvas: Rect, zoomed: bool) -> Vec<Rect> {
         let p = self.palette;
         let mut blocked = Vec::new();
-        if !zoomed {
+        if !zoomed && self.ocr.is_none() {
             blocked.push(floating(
                 ctx,
                 "gear",
@@ -1033,69 +1121,115 @@ impl Viewer {
                     },
                 ));
             }
-
-            if self.loaded.is_some() && !self.crop {
-                blocked.push(floating(
-                    ctx,
-                    "edit-toggle",
-                    pos2(canvas.left() + 14.0, canvas.bottom() - 54.0),
-                    |ui| {
+        }
+        if self.loaded.is_some() && !self.crop {
+            blocked.push(floating(
+                ctx,
+                "edit-toggle",
+                pos2(canvas.left() + 14.0, canvas.bottom() - 54.0),
+                |ui| {
+                    ui.horizontal(|ui| {
                         if ui
-                            .add_sized([40.0, 40.0], panel_button(icon('\u{e70f}', 16.0), p))
+                            .add_enabled_ui(self.ocr.is_none(), |ui| {
+                                ui.add_sized([40.0, 40.0], panel_button(icon('\u{e70f}', 16.0), p))
+                            })
+                            .inner
                             .on_hover_text("Показать инструменты (поворот, отражение, обрезка)")
                             .clicked()
                         {
                             self.tools = !self.tools;
                         }
+                        if ocr_button(ui, p, self.ocr.is_some()) {
+                            if self.ocr.is_some() {
+                                self.ocr = None;
+                            } else {
+                                self.start_ocr(ctx);
+                            }
+                        }
+                    });
+                },
+            ));
+            if self.tools {
+                blocked.push(floating(
+                    ctx,
+                    "edit-tools",
+                    pos2(canvas.left() + 112.0, canvas.bottom() - 60.0),
+                    |ui| {
+                        panel_frame(p, 13, 4).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                if tool_button(ui, "↺", "Повернуть влево (Shift+R)", p)
+                                {
+                                    self.change(ctx, image::imageops::rotate270);
+                                }
+                                if tool_button(ui, "↻", "Повернуть вправо (R)", p)
+                                {
+                                    self.change(ctx, image::imageops::rotate90);
+                                }
+                                ui.separator();
+                                if tool_button(ui, "⇋", "Отразить по горизонтали (H)", p)
+                                {
+                                    self.change(ctx, image::imageops::flip_horizontal);
+                                }
+                                if tool_button(ui, "⇅", "Отразить по вертикали (V)", p)
+                                {
+                                    self.change(ctx, image::imageops::flip_vertical);
+                                }
+                                ui.separator();
+                                if tool_button(ui, "⛶", "Обрезать (C)", p) {
+                                    self.toggle_crop();
+                                }
+                                if ui
+                                    .add_sized(
+                                        [38.0, 38.0],
+                                        panel_button(icon('\u{e946}', 16.0), p),
+                                    )
+                                    .on_hover_text("Метаданные (M)")
+                                    .clicked()
+                                {
+                                    self.show_meta(ctx);
+                                }
+                            });
+                        });
                     },
                 ));
-                if self.tools {
-                    blocked.push(floating(
-                        ctx,
-                        "edit-tools",
-                        pos2(canvas.left() + 64.0, canvas.bottom() - 60.0),
-                        |ui| {
-                            panel_frame(p, 13, 4).show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    if tool_button(ui, "↺", "Повернуть влево (Shift+R)", p)
-                                    {
-                                        self.change(ctx, image::imageops::rotate270);
-                                    }
-                                    if tool_button(ui, "↻", "Повернуть вправо (R)", p)
-                                    {
-                                        self.change(ctx, image::imageops::rotate90);
-                                    }
-                                    ui.separator();
-                                    if tool_button(ui, "⇋", "Отразить по горизонтали (H)", p)
-                                    {
-                                        self.change(ctx, image::imageops::flip_horizontal);
-                                    }
-                                    if tool_button(ui, "⇅", "Отразить по вертикали (V)", p)
-                                    {
-                                        self.change(ctx, image::imageops::flip_vertical);
-                                    }
-                                    ui.separator();
-                                    if tool_button(ui, "⛶", "Обрезать (C)", p) {
-                                        self.toggle_crop();
-                                    }
-                                    if ui
-                                        .add_sized(
-                                            [38.0, 38.0],
-                                            panel_button(icon('\u{e946}', 16.0), p),
-                                        )
-                                        .on_hover_text("Метаданные (M)")
-                                        .clicked()
-                                    {
-                                        self.show_meta(ctx);
-                                    }
-                                });
-                            });
-                        },
-                    ));
-                }
             }
         }
-        if self.crop {
+        if let Some(ocr) = &self.ocr {
+            let message = ocr.message.clone();
+            let previous = self.ocr_language;
+            blocked.push(floating(
+                ctx,
+                "ocr-controls",
+                pos2(canvas.left() + 112.0, canvas.bottom() - 54.0),
+                |ui| {
+                    panel_frame(p, 11, 8).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            egui::ComboBox::from_id_salt("ocr-language")
+                                .selected_text(self.ocr_language.label())
+                                .width(76.0)
+                                .show_ui(ui, |ui| {
+                                    for language in OcrLanguage::ALL {
+                                        ui.selectable_value(
+                                            &mut self.ocr_language,
+                                            language,
+                                            language.label(),
+                                        );
+                                    }
+                                });
+                            ui.add_sized(
+                                [(canvas.width() - 230.0).min(350.0), 20.0],
+                                egui::Label::new(RichText::new(&message).size(12.0).color(p.muted))
+                                    .truncate(),
+                            )
+                            .on_hover_text(&message);
+                        });
+                    });
+                },
+            ));
+            if self.ocr_language != previous {
+                self.start_ocr(ctx);
+            }
+        } else if self.crop {
             blocked.push(floating(
                 ctx,
                 "crop-apply",
@@ -1283,7 +1417,7 @@ impl Viewer {
                         self.tools = false;
                     }
                 }
-                if response.double_clicked() {
+                if self.ocr.is_none() && response.double_clicked() {
                     if self.view.is_zoomed(canvas, size) {
                         self.view.fit(canvas, size);
                     } else {
@@ -1291,7 +1425,31 @@ impl Viewer {
                     }
                 }
             }
-            if self.crop {
+            if let Some(ocr) = &mut self.ocr {
+                let bounds = Rect::from_min_size(self.view.origin, size * self.view.scale);
+                let fractional = |point: Pos2| {
+                    let uv =
+                        ((point - bounds.min) / bounds.size()).clamp(Vec2::ZERO, Vec2::splat(1.0));
+                    pos2(uv.x, uv.y)
+                };
+                let over_image = available && pointer.is_some_and(|point| bounds.contains(point));
+                if over_image {
+                    ctx.set_cursor_icon(egui::CursorIcon::Text);
+                }
+                if over_image && pressed && !ocr.lines.is_empty() {
+                    let start = fractional(pointer.unwrap());
+                    ocr.area = Some((start, start));
+                    ocr.dragging = true;
+                }
+                if ocr.dragging {
+                    let (down, position) =
+                        ctx.input(|i| (i.pointer.primary_down(), i.pointer.interact_pos()));
+                    if let (Some(point), Some((_, end))) = (position, &mut ocr.area) {
+                        *end = fractional(point);
+                    }
+                    ocr.dragging = down;
+                }
+            } else if self.crop {
                 let pixel = |point: Pos2| {
                     let pixel =
                         ((point - self.view.origin) / self.view.scale).clamp(Vec2::ZERO, size);
@@ -1320,6 +1478,22 @@ impl Viewer {
             &loaded.picture.frames[self.frame].image,
             self.view.scale,
         );
+        if let Some(ocr) = &self.ocr {
+            let painter = ui.painter().with_clip_rect(canvas.intersect(image_rect));
+            let on_image = |point: Pos2| image_rect.min + point.to_vec2() * image_rect.size();
+            for word in ocr.lines.iter().flatten() {
+                let rect = Rect::from_min_max(on_image(word.bounds.min), on_image(word.bounds.max));
+                if ocr.contains(word) {
+                    painter.rect_filled(rect, 2, p.accent.gamma_multiply(0.55));
+                }
+                painter.rect_stroke(
+                    rect,
+                    2,
+                    Stroke::new(1.0_f32, p.accent.gamma_multiply(0.7)),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
         if self.crop {
             if let Some((start, end)) = self.selection {
                 let painter = ui.painter().with_clip_rect(canvas);
@@ -1404,6 +1578,34 @@ impl Viewer {
             || self.dirty_action.is_some()
             || self.busy()
         {
+            return;
+        }
+        if let Some(ocr) = &mut self.ocr {
+            let (escape, copy) = ctx.input(|input| {
+                (
+                    input.key_pressed(Key::Escape),
+                    input.events.iter().any(|event| match event {
+                        egui::Event::Copy => true,
+                        egui::Event::Key {
+                            key,
+                            physical_key,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } => modifiers.command && (*key == Key::C || *physical_key == Some(Key::C)),
+                        _ => false,
+                    }),
+                )
+            });
+            if escape {
+                self.ocr = None;
+            } else if copy {
+                let text = ocr.selected_text();
+                if !text.is_empty() {
+                    ctx.copy_text(text);
+                    ocr.message = "Текст скопирован • Esc — выйти".into();
+                }
+            }
             return;
         }
         for event in ctx.input(|i| i.events.clone()) {
@@ -1682,9 +1884,6 @@ impl eframe::App for Viewer {
                 self.loading_overlay(ui);
                 self.title(ui, title);
                 self.status_bar(ui, status);
-                if !self.settings.maximized && clear {
-                    borders(ui, all);
-                }
             });
 
         if self.integrations {
@@ -1815,6 +2014,28 @@ fn panel_button(label: RichText, p: Palette) -> Button<'static> {
         .corner_radius(8)
 }
 
+fn ocr_button(ui: &mut Ui, p: Palette, active: bool) -> bool {
+    let label = "Выделение текста на изображении";
+    let mut button = panel_button(RichText::new(""), p);
+    if active {
+        button = button.fill(p.accent).stroke(Stroke::NONE);
+    }
+    let response = ui.add_sized([42.0, 40.0], button).on_hover_text(label);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    let center = response.rect.center();
+    let stroke = Stroke::new(1.5_f32, if active { Color32::WHITE } else { p.text });
+    let painter = ui.painter();
+    for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let corner = center + vec2(9.0 * x, 8.0 * y);
+        painter.line_segment([corner, corner - vec2(4.0 * x, 0.0)], stroke);
+        painter.line_segment([corner, corner - vec2(0.0, 4.0 * y)], stroke);
+    }
+    for (y, right) in [(-3.0, 5.0), (0.0, 5.0), (3.0, 2.0)] {
+        painter.line_segment([center + vec2(-5.0, y), center + vec2(right, y)], stroke);
+    }
+    response.clicked()
+}
+
 fn tool_button(ui: &mut Ui, label: &str, hint: &str, p: Palette) -> bool {
     ui.add_sized(
         [38.0, 38.0],
@@ -1864,34 +2085,4 @@ fn menu_row(ui: &mut Ui, label: &str, binding: &str, enabled: bool, p: Palette) 
         p.muted,
     );
     response.clicked()
-}
-
-fn borders(ui: &mut Ui, rect: Rect) {
-    use egui::{CursorIcon, ResizeDirection::*};
-    let ctx = ui.ctx().clone();
-    let Some(pointer) = ctx
-        .input(|i| i.pointer.hover_pos())
-        .filter(|p| rect.contains(*p))
-    else {
-        return;
-    };
-    let left = pointer.x < rect.left() + 6.0;
-    let right = pointer.x > rect.right() - 6.0;
-    let top = pointer.y < rect.top() + 6.0;
-    let bottom = pointer.y > rect.bottom() - 6.0;
-    let (direction, cursor) = match (left, right, top, bottom) {
-        (true, _, true, _) => (NorthWest, CursorIcon::ResizeNwSe),
-        (_, true, _, true) => (SouthEast, CursorIcon::ResizeNwSe),
-        (true, _, _, true) => (SouthWest, CursorIcon::ResizeNeSw),
-        (_, true, true, _) => (NorthEast, CursorIcon::ResizeNeSw),
-        (true, _, _, _) => (West, CursorIcon::ResizeHorizontal),
-        (_, true, _, _) => (East, CursorIcon::ResizeHorizontal),
-        (_, _, true, _) => (North, CursorIcon::ResizeVertical),
-        (_, _, _, true) => (South, CursorIcon::ResizeVertical),
-        _ => return,
-    };
-    ctx.set_cursor_icon(cursor);
-    if ctx.input(|i| i.pointer.primary_pressed()) {
-        ctx.send_viewport_cmd(ViewportCommand::BeginResize(direction));
-    }
 }

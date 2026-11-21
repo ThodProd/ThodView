@@ -2,6 +2,7 @@
 
 mod decode;
 mod metadata;
+mod ocr;
 mod process;
 mod shell;
 mod ui;
@@ -68,6 +69,7 @@ fn run(first: Option<std::ffi::OsString>) -> process::Result<()> {
         ])
         .with_min_inner_size([620.0, 420.0])
         .with_decorations(false)
+        .with_resizable(true)
         .with_drag_and_drop(true)
         .with_maximized(settings.maximized);
     if let Ok(image) = image::load_from_memory_with_format(
