@@ -1,0 +1,35 @@
+[package]
+name = "thodview"
+version = "2.0.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "ThodView"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
+jxl-oxide = { version = "0.12", features = ["moxcms"] }
+moxcms = { version = "0.8", features = ["in_place"] }
+resvg = "0.45"
+flate2 = "1"
+rfd = { version = "0.17", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+winreg = "0.55"
+windows = { version = "0.62", features = [
+    "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage", "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+embed-resource = "3"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"
+

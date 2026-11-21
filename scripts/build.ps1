@@ -1,163 +1,124 @@
-<#
-  Builds ThodView and packs it for ThodHUB.
-
-  Pinned tools:
-    ffmpeg 9.0.2 essentials (Gyan build, GPLv3)
-    ExifTool 13.59 portable (GPLv3)
-
-  Examples:
-    .\scripts\build.ps1
-    .\scripts\build.ps1 -Version 1.0.1 -FfmpegZip D:\tools\ffmpeg.zip -ExifToolZip D:\tools\exiftool.zip
-#>
 [CmdletBinding()]
 param(
     [string]$Version = '',
-    [string]$Configuration = 'Release',
+    [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release',
     [string]$OutputDirectory = '',
     [string]$FfmpegZip = '',
     [string]$ExifToolZip = '',
-    [string]$Notes = '',
     [switch]$SkipPackage
 )
 
 $ErrorActionPreference = 'Stop'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'artifacts' }
-$manifestPath = Join-Path $root 'hub\manifest.json'
-$manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-
-if (-not $Version) { $Version = $manifest.version }
-if (-not $Notes) { $Notes = "ThodView $Version - offline image viewer with folder navigation, editing and metadata for ThodHUB." }
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$cache = Join-Path $root '.cache'
+if (-not $Version) {
+    $manifest = Get-Content -LiteralPath (Join-Path $root 'Cargo.toml') -Raw
+    $Version = [regex]::Match($manifest, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
+}
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
-    throw "Version must look like 1.2.3, got '$Version'."
+    throw "Invalid version '$Version'."
 }
 
-$OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-$cache = Join-Path $root '.cache'
-$stage = Join-Path $OutputDirectory "stage-$Version"
-$appOut = Join-Path $stage 'app'
-$ffmpegSha = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
-$exifToolSha = '577257dd22baebe77157d905792d6ed2c5916cd03aa627f40b2175db12110ac6'
-$ffmpegUrl = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip'
-$exifToolUrl = 'https://oliverbetz.de/cms/files/Artikel/ExifTool-for-Windows/exiftool-13.59_64.zip'
+$cargo = Get-Command cargo -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($cargo) {
+    $cargoPath = $cargo.Source
+} else {
+    $cargoPath = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+    if (-not (Test-Path -LiteralPath $cargoPath)) { throw 'Rust toolchain (cargo) was not found.' }
+    $env:Path = "$(Split-Path -Parent $cargoPath);$env:Path"
+}
+$toolchain = & $cargoPath -vV | Select-String '^host: x86_64-pc-windows-(msvc|gnu)$'
+if (-not $toolchain) { throw 'Use a Windows x64 Rust toolchain (MSVC or GNU).' }
+$target = ($toolchain.Line -split ' ')[1]
+$arguments = @('build', '--locked', '--bin', 'ThodView', '--target', $target,
+    '--target-dir', (Join-Path $root 'target'), '--manifest-path', (Join-Path $root 'Cargo.toml'))
+if ($Configuration -eq 'Release') { $arguments += '--release' }
+& $cargoPath @arguments
+if ($LASTEXITCODE -ne 0) { throw "Cargo build failed ($LASTEXITCODE)." }
 
-function Get-ToolFile {
-    param([string]$Path, [string]$Url, [string]$Sha256, [string]$Name)
-    if (-not $Path) {
-        New-Item -ItemType Directory -Path $cache -Force | Out-Null
-        $Path = Join-Path $cache $Name
-    }
+function Get-ToolArchive {
+    param([string]$Path, [string]$Uri, [string]$Sha256, [string]$Name)
+    if (-not $Path) { $Path = Join-Path $cache $Name }
     if (-not (Test-Path -LiteralPath $Path)) {
-        Write-Host "Downloading $Name ..."
-        Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing
+        New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+        $download = "$Path.part"
+        try {
+            Invoke-WebRequest -Uri $Uri -OutFile $download -UseBasicParsing
+            if ((Get-FileHash -LiteralPath $download).Hash -ne $Sha256) { throw "Invalid SHA-256 for $Name." }
+            Move-Item -LiteralPath $download -Destination $Path -Force
+        } finally {
+            if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download -Force }
+        }
     }
-    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne $Sha256) {
-        throw "SHA-256 mismatch for $Name. Expected $Sha256, got $actual."
-    }
+    if ((Get-FileHash -LiteralPath $Path).Hash -ne $Sha256) { throw "Invalid SHA-256 for $Name." }
     return (Resolve-Path -LiteralPath $Path).Path
 }
 
-Write-Host "ThodView $Version"
-Write-Host "Workspace: $root"
+$ffmpegArchive = Get-ToolArchive $FfmpegZip 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip' '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba' 'ffmpeg-9.0.2-essentials_build.zip'
+$exifArchive = Get-ToolArchive $ExifToolZip 'https://oliverbetz.de/cms/files/Artikel/ExifTool-for-Windows/exiftool-13.59_64.zip' '577257dd22baebe77157d905792d6ed2c5916cd03aa627f40b2175db12110ac6' 'exiftool-13.59_64.zip'
 
-New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
-New-Item -ItemType Directory -Path $stage -Force | Out-Null
-
-# --- self-contained application ---------------------------------------------
-$project = Join-Path $root 'src\ThodView\ThodView.csproj'
-Write-Host 'Publishing ThodView (win-x64, self-contained) ...'
-& dotnet publish $project `
-    -c $Configuration `
-    -r win-x64 `
-    --self-contained true `
-    -p:Version=$Version `
-    -p:DebugType=None `
-    -p:DebugSymbols=false `
-    -p:PublishSingleFile=false `
-    -o $appOut
-if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }
-
-# --- manifest ---------------------------------------------------------------
-$manifest.version = $Version
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), ($manifest | ConvertTo-Json -Depth 10), $utf8NoBom)
-
-# --- docs / licenses --------------------------------------------------------
+$name = "thodview-$Version-win-x64"
+$stage = Join-Path $OutputDirectory $name
+$licensesOut = Join-Path $stage 'licenses'
+$ffmpegOut = Join-Path $stage 'runtime\ffmpeg'
+$exifOut = Join-Path $stage 'runtime\exiftool'
+New-Item -ItemType Directory -Path $stage, $licensesOut, $ffmpegOut, $exifOut -Force | Out-Null
+$exe = Join-Path $root "target\$target\$($Configuration.ToLowerInvariant())\ThodView.exe"
+Copy-Item -LiteralPath $exe -Destination $stage -Force
 foreach ($file in 'README.md', 'THIRD-PARTY-NOTICES.md', 'LICENSE') {
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $stage -Force
 }
-$licensesOut = Join-Path $stage 'licenses'
-New-Item -ItemType Directory -Path $licensesOut -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'licenses\FFMPEG-SOURCE-OFFER.txt') -Destination $licensesOut -Force
 
-# --- ffmpeg -----------------------------------------------------------------
-$ffmpegArchive = Get-ToolFile -Path $FfmpegZip -Url $ffmpegUrl -Sha256 $ffmpegSha -Name 'ffmpeg-9.0.2-essentials_build.zip'
-$ffmpegExtract = Join-Path $cache 'ffmpeg-extract-view'
-if (Test-Path -LiteralPath $ffmpegExtract) { Remove-Item -LiteralPath $ffmpegExtract -Recurse -Force }
-Write-Host 'Extracting ffmpeg ...'
-Expand-Archive -LiteralPath $ffmpegArchive -DestinationPath $ffmpegExtract -Force
-$ffmpegBin = Get-ChildItem -LiteralPath $ffmpegExtract -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1
-if (-not $ffmpegBin) { throw 'ffmpeg.exe was not found in the archive.' }
-$runtimeOut = Join-Path $appOut 'runtime\ffmpeg'
-New-Item -ItemType Directory -Path $runtimeOut -Force | Out-Null
-Copy-Item -LiteralPath $ffmpegBin.FullName -Destination $runtimeOut -Force
-$ffprobe = Join-Path $ffmpegBin.Directory.FullName 'ffprobe.exe'
-if (-not (Test-Path -LiteralPath $ffprobe)) { throw 'ffprobe.exe was not found in the archive.' }
-Copy-Item -LiteralPath $ffprobe -Destination $runtimeOut -Force
-$ffmpegLicense = Join-Path (Split-Path $ffmpegBin.Directory.FullName -Parent) 'LICENSE'
-if (-not (Test-Path -LiteralPath $ffmpegLicense)) { throw 'ffmpeg LICENSE was not found in the archive.' }
-Copy-Item -LiteralPath $ffmpegLicense -Destination (Join-Path $licensesOut 'ffmpeg-COPYING.txt') -Force
-
-# --- exiftool ---------------------------------------------------------------
-$exifArchive = Get-ToolFile -Path $ExifToolZip -Url $exifToolUrl -Sha256 $exifToolSha -Name 'exiftool-13.59_64.zip'
-$exifExtract = Join-Path $cache 'exiftool-extract'
-if (Test-Path -LiteralPath $exifExtract) { Remove-Item -LiteralPath $exifExtract -Recurse -Force }
-Write-Host 'Extracting ExifTool ...'
-Expand-Archive -LiteralPath $exifArchive -DestinationPath $exifExtract -Force
-$exifExe = Get-ChildItem -LiteralPath $exifExtract -Recurse -Filter 'ExifTool.exe' | Select-Object -First 1
-if (-not $exifExe) { throw 'ExifTool.exe was not found in the archive.' }
-$exifOut = Join-Path $appOut 'runtime\exiftool'
-New-Item -ItemType Directory -Path $exifOut -Force | Out-Null
-Copy-Item -LiteralPath $exifExe.FullName -Destination (Join-Path $exifOut 'ExifTool.exe') -Force
-$exifFiles = Join-Path $exifExe.Directory.FullName 'exiftool_files'
-if (-not (Test-Path -LiteralPath $exifFiles)) { throw 'exiftool_files folder was not found in the archive.' }
-Copy-Item -LiteralPath $exifFiles -Destination (Join-Path $exifOut 'exiftool_files') -Recurse -Force
-Get-ChildItem -LiteralPath (Join-Path $exifOut 'exiftool_files') -Filter 'unins*' -Force | Remove-Item -Force -ErrorAction SilentlyContinue
-$exifLicense = Join-Path $exifFiles 'LICENSE'
-if (Test-Path -LiteralPath $exifLicense) {
-    Copy-Item -LiteralPath $exifLicense -Destination (Join-Path $licensesOut 'exiftool-COPYING.txt') -Force
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+function Copy-ZipFiles {
+    param([string]$Archive, [hashtable]$ExactNames, [string]$ExifDestination)
+    $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
+    try {
+        $remaining = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($key in $ExactNames.Keys) { [void]$remaining.Add($key) }
+        foreach ($entry in $zip.Entries) {
+            $name = $entry.FullName.Replace('\', '/')
+            if ($ExactNames.ContainsKey($name)) {
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $ExactNames[$name], $true)
+                [void]$remaining.Remove($name)
+            } elseif ($ExifDestination -and $entry.Name -and $name -match '(?:^|/)exiftool_files/(.+)$') {
+                $relative = $Matches[1]
+                if ($relative -match '(^|/)\.\.(/|$)|:|^/' -or $relative -match '^unins') { continue }
+                $destination = Join-Path $ExifDestination "exiftool_files/$relative"
+                New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $true)
+            }
+        }
+        if ($remaining.Count -ne 0) { throw "Missing archive entries: $($remaining -join ', ')" }
+    } finally { $zip.Dispose() }
 }
-$exifVersion = & (Join-Path $exifOut 'ExifTool.exe') -ver
-if ($LASTEXITCODE -ne 0) { throw 'Bundled ExifTool did not start.' }
-Write-Host "ExifTool: $exifVersion"
 
-# --- package ----------------------------------------------------------------
-$zip = $null
+$ffmpegPrefix = 'ffmpeg-9.0.2-essentials_build'
+Copy-ZipFiles $ffmpegArchive @{
+    "$ffmpegPrefix/bin/ffmpeg.exe" = (Join-Path $ffmpegOut 'ffmpeg.exe')
+    "$ffmpegPrefix/LICENSE" = (Join-Path $licensesOut 'ffmpeg-COPYING.txt')
+}
+$exifZipFile = [IO.Compression.ZipFile]::OpenRead($exifArchive)
+try {
+    $exifEntry = $exifZipFile.Entries | Where-Object { $_.Name -ieq 'ExifTool.exe' } | Select-Object -First 1
+    if (-not $exifEntry) { throw 'ExifTool.exe was not found in the archive.' }
+    $exifName = $exifEntry.FullName.Replace('\', '/')
+} finally { $exifZipFile.Dispose() }
+Copy-ZipFiles $exifArchive @{ $exifName = (Join-Path $exifOut 'ExifTool.exe') } $exifOut
+Copy-Item -LiteralPath (Join-Path $exifOut 'exiftool_files\LICENSE') -Destination (Join-Path $licensesOut 'exiftool-COPYING.txt') -Force
+
 if (-not $SkipPackage) {
-    $packageScript = Join-Path $root 'scripts\package-module.ps1'
-    $existing = Join-Path $OutputDirectory "thodview-$Version-win-x64.zip"
-    if (Test-Path -LiteralPath $existing) { Remove-Item -LiteralPath $existing -Force }
-    $zip = & $packageScript `
-        -PackageDirectory $stage `
-        -Repository 'ThodProd/ThodView' `
-        -OutputDirectory $OutputDirectory `
-        -Notes $Notes
-    if (-not $zip -or -not (Test-Path -LiteralPath $zip)) { throw 'Packaging failed: ZIP was not produced.' }
-
-    $releasePath = Join-Path $OutputDirectory 'thodhub-release.json'
-    $release = Get-Content -LiteralPath $releasePath -Raw | ConvertFrom-Json
-    $actualHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-    $actualSize = (Get-Item -LiteralPath $zip).Length
-    if ($release.sha256 -ne $actualHash -or [long]$release.size -ne $actualSize) {
-        throw 'Packaging verification failed: SHA-256/size do not match thodhub-release.json.'
+    $file = Join-Path $OutputDirectory "$name.zip"
+    $pending = Join-Path $OutputDirectory "$name.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.Compression.ZipFile]::CreateFromDirectory($stage, $pending, [IO.Compression.CompressionLevel]::Optimal, $false)
+        Move-Item -LiteralPath $pending -Destination $file -Force
+    } finally {
+        if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
     }
-    Write-Host ''
-    Write-Host "Package : $zip"
-    Write-Host "SHA-256 : $actualHash"
-    Write-Host "Size    : $actualSize bytes"
-    Write-Host "Release : $releasePath"
-} else {
-    Write-Host "Staged  : $stage"
+    Get-FileHash -LiteralPath $file
 }
+Write-Host "ThodView: $(Join-Path $stage 'ThodView.exe')"

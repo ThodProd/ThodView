@@ -1,21 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ThodView">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2f6fed"/>
-      <stop offset="1" stop-color="#7b4dff"/>
+    <linearGradient id="case" x2="1" y2="1">
+      <stop stop-color="#181f3d"/>
+      <stop offset="1" stop-color="#302164"/>
     </linearGradient>
-    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffe9a8"/>
-      <stop offset="1" stop-color="#ffb35c"/>
+    <linearGradient id="sky" x2=".9" y2="1">
+      <stop stop-color="#96d5ff"/>
+      <stop offset="1" stop-color="#647aee"/>
     </linearGradient>
+    <linearGradient id="mountains" x2="0" y2="1">
+      <stop stop-color="#5650b5"/>
+      <stop offset="1" stop-color="#2b296c"/>
+    </linearGradient>
+    <clipPath id="photo"><rect x="72" y="91" width="368" height="330" rx="38"/></clipPath>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <rect x="74" y="86" width="364" height="300" rx="34" fill="#0d1220" opacity=".24"/>
-  <rect x="92" y="102" width="328" height="264" rx="26" fill="#ffffff"/>
-  <circle cx="348" cy="170" r="32" fill="url(#sun)"/>
-  <path d="M112 322l86-106 62 70 44-46 88 82H112z" fill="#36415c"/>
-  <path d="M112 322l86-106 26 30-60 76h-52z" fill="#26314a"/>
-  <path d="M252 308l40 38h-80l20-38z" fill="#5c6b8c"/>
-  <path d="M130 420h252" stroke="#ffffff" stroke-width="18" stroke-linecap="round" opacity=".9"/>
-  <path d="M166 386l-28 34 28 34M346 386l28 34-28 34" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+  <rect x="12" y="12" width="488" height="488" rx="111" fill="url(#case)" stroke="#6c7de2" stroke-width="12"/>
+  <g clip-path="url(#photo)">
+    <rect x="72" y="91" width="368" height="330" fill="url(#sky)"/>
+    <circle cx="342" cy="184" r="43" fill="#fff0b0"/>
+    <path d="M48 385l141-169 85 94 44-51 136 141v40H48z" fill="url(#mountains)"/>
+    <path d="m139 276 50-60 54 60-37-13-18 11-17-11z" fill="#e8f1ff"/>
+    <path d="M62 385q116-51 212-14t182 29v40H62z" fill="#292657"/>
+  </g>
+  <rect x="72" y="91" width="368" height="330" rx="38" fill="none" stroke="#e8eeff" stroke-width="14"/>
 </svg>
